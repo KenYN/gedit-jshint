@@ -1,8 +1,6 @@
 from gettext import gettext as _
 
-import gtk
-import gconf
-import gedit
+from gi.repository import GObject, Gtk, GtkSource, Gedit, Gio
 import os
 import simplejson
 import urllib
@@ -47,7 +45,8 @@ class JSHintWindowHelper:
         self._action_group = gtk.ActionGroup("JSHintPluginActions")
         self._action_group.add_actions([("JSHint", None, _("JSHint Check"),
                                          "<Shift><Ctrl>J", _("JSHint Check"),
-                                         self.on_jshint_activate)])
+                                         lambda a, w: self.on_jshint_activate())],
+                                    self._window)
 
         # Insert the action group
         manager.insert_action_group(self._action_group, -1)
@@ -93,11 +92,11 @@ class JSHintWindowHelper:
         view.grab_focus()
 
     # Menu activate handlers
-    def on_jshint_activate(self, action):
+    def on_jshint_activate(self):
         doc = self._window.get_active_document()
         view = self._window.get_active_view()
         buf = view.get_buffer()
-        language = buf.get_language()
+        language = doc.get_language()
 
         # Only javascript
         if language.get_id() != 'js':
@@ -162,32 +161,35 @@ class JSHintWindowHelper:
         self._window.get_bottom_panel().set_property("visible", True)
 
 
-class JSHintPlugin(gedit.Plugin):
+class JSHintPlugin(GObject.Object, Gedit.WindowActivatable):
+    __gtype_name__ = "JSHintPlugin"
+
+    window = GObject.property(type=Gedit.Window)
 
     def __init__(self):
-        gedit.Plugin.__init__(self)
-        self._instances = {}
+        GObject.Object.__init__(self)
 
-    def activate(self, window):
-        self.client = gconf.client_get_default()
-        self.prefs_key = "/apps/gedit-jshint"
-        self.client.add_dir(self.prefs_key, gconf.CLIENT_PRELOAD_NONE)
-        self.globals = self.client.get_string(self.prefs_key + "/globals")
-        self.configuration = self.client.get_string(self.prefs_key + "/configuration")
+    def do_activate(self):
+        self.prefs_key = "apps.gedit-jshint"
+        self.client = Gio.Settings.new(self.prefs_key)
+        self.globals = self.client.get_string("globals")
+        self.configuration = self.client.get_string("configuration")
 
         if self.globals is None:
             self.globals = "/* */"
-            self.client.set_string(self.prefs_key + "/globals", self.globals)
+            self.client.set_string("globals", self.globals)
 
         if self.configuration is None:
             self.configuration = "/* curly: true, eqeqeq: true, forin: true, undef: true,*/"
-            self.client.set_string(self.prefs_key + "/configuration", self.configuration)
+            self.client.set_string("configuration", self.configuration)
 
-        self._instances[window] = JSHintWindowHelper(self, window)
+        self._instances[self.window] = JSHintWindowHelper(self, self.window)
 
-    def deactivate(self, window):
-        self._instances[window].deactivate()
-        del self._instances[window]
+    def do_deactivate(self):
+        self._remove_menu()
+
+    def _remove_menu(self):
+        self._instances[window]._remove_menu()
 
     def update_ui(self, window):
         self._instances[window].update_ui()
@@ -196,7 +198,7 @@ class JSHintPlugin(gedit.Plugin):
     def is_configurable(self):
         return True
 
-    def create_configure_dialog(self):
+    def do_create_configure_widget(self):
         self.dialog = gtk.Dialog("JSHint Configuration")
         self.dialog.set_alternative_button_order([gtk.RESPONSE_ACCEPT, gtk.RESPONSE_CANCEL])
         self.dialog.set_border_width(10)
